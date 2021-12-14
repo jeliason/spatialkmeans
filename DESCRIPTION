@@ -1,0 +1,14 @@
+Package: spatialkmeans
+Type: Package
+Title: Cluster Spatial Omics Data Via Spatially Regularized K-Means
+Version: 0.1.0
+Author: Joel Eliason, Ying Jiang and Li Liu
+Maintainer: Joel Eliason <joelne@umich.edu>
+Description: Single-cell spatial omics clustering, incorporating the physical distance between cells into the omics distance. This penalizes cells that are further away from being in the same cluster.
+Encoding: UTF-8
+License: GPL-3
+LazyData: true
+Imports:
+  matrixStats,
+  stats
+RoxygenNote: 7.1.2
