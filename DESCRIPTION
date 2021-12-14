@@ -10,5 +10,6 @@ License: GPL-3
 LazyData: true
 Imports:
   matrixStats,
-  stats
+  stats,
+  rdist
 RoxygenNote: 7.1.2

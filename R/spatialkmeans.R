@@ -7,5 +7,6 @@
 #' @author Joel Eliason \email{joelne@umich.edu}
 #' @import matrixStats
 #' @import stats
+#' @import rdist
 #' @name spatialkmeans
 NULL

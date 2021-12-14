@@ -35,9 +35,7 @@ k.means.spatial = function(X, cell.dists, nclust=3, lambda=0.1, metric=matrixSta
   clust = last.clust
   scale = max(colMeans(abs(X)))
   while(it < max.iter & assign.changed) {
-    dists = outer(1:nclust,1:nrow(X), Vectorize(function(i,j) {
-      sum((mus[,i] - X[j,])^2)
-    }))
+    dists = rdist::cdist(t(mus),X)
     phys.dists = spatial.distance(cell.dists, clust)
     phys.dists = lambda*scale*phys.dists
     dists = dists + phys.dists
