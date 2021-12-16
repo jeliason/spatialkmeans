@@ -1,0 +1,491 @@
+---
+title: "Comparison of clustering results"
+author: "Ying Jiang and Joel Eliason"
+date: "2021/11/15"
+output: html_document
+---
+
+The 10x_spatial_positions and X_pca files are the files of the spatial positions of the cells and the reduced-dim features for each cell.
+
+df$ncluster: 3/6/10
+df$lambda: 1/10
+df$quantile_fun: colMaxs/colMeds/colMins 
+
+```{r setup, include=FALSE}
+X = read.csv("X_pca.csv", header = F) # 50-d features of cells after PCA
+coord = read.csv("10x_spatial_positions.csv", header = F)# 2-dimensional position
+df = readRDS("cluster_sweep_results.rds") # results from running the cluster_sweep function
+
+# change 'cluster' variable from factor to numerical
+df$cluster =as.numeric(levels(df$cluster)[df$cluster])
+```
+
+## Comparision between Different clustering methods: 
+1. basic KMeans 
+2. hierarchical 
+3. GMM
+
+All methods are on X(50-d after PCA) and use coord to do visualization
+```{r}
+library(stats)
+library(flexclust)
+library(mclust)
+library(cowplot)
+library(cluster)
+library(knitr)
+library(tidyverse)
+```
+
+#### A func to get clustering results from different clustering methods.
+```{r}
+#input:
+## k: 3/6/10
+## l: 1/10
+## q_fun: 'colMaxs'/'colMeds'/'colMins' 
+
+#output:
+## dataframe: cols: x - coord x
+##                  y - coord y
+##                  kmeans_spatial - kmeans_spatial clustering result with specific k/lambda/quantile function
+##                  kmeans - kmeans clustering result
+##                  hier - hierarchical clustering result
+##                  gmm - GMM clustering result
+
+compare = function(k, l, q_fun){
+  data = df %>% filter(lambda == l) %>%
+         filter(nclust == k) %>%
+         filter(quantile_fun == q_fun)
+  
+  # basic k-means
+  kmeans_res = kmeans(X, k)$cluster
+  
+  #  hierarchical
+  X.scale = scale(X)
+  d = dist(X.scale)
+  fit<-hclust(d, method="ward.D2") # Ward method
+  hier_res = cutree(fit, k)
+  
+  # GMM
+  gmm_res = Mclust(X, G=k)$classification
+  
+  data_show = cbind(coord, data$cluster, kmeans_res, hier_res, gmm_res)
+  colnames(data_show) = c('x', 'y', 'kmeans_spatial', 'kmeans', 'hier', 'gmm')
+  return(data_show)
+}
+
+compare_precomp = function(k, l, q_fun, precomp_data){
+  data = df %>% filter(lambda == l) %>%
+         filter(nclust == k) %>%
+         filter(quantile_fun == q_fun)
+  
+  data_show = cbind(coord, data$cluster, precomp_data)
+  colnames(data_show) = c('x', 'y', 'kmeans_spatial', 'kmeans', 'hier', 'gmm')
+  return(data_show)
+}
+```
+
+```{r}
+# k=3/6/10, lambda=1, quantile_function = 'colMeds' -- Can also try other parameters
+#will take some time due to the GMM model
+data.3 = compare(3, 1, 'colMeds')
+data.6 = compare(6, 1, 'colMeds')
+data.10 = compare(10, 1, 'colMeds')
+```
+
+```{r}
+# if data are already computed from above, can reload
+# data = readRDS("comparisons.rds")
+# data.3 = data[[1]]
+# data.6 = data[[2]]
+# data.10 = data[[3]]
+# precomp.3 = data.3[,4:6]
+# precomp.6 = data.6[,4:6]
+# precomp.10 = data.10[,4:6]
+```
+
+
+```{r}
+# plot k=3 as an example
+p1 = ggplot(data.3) + geom_point(aes(x = x, y = y, colour = factor(kmeans_spatial)))+ggtitle('Kmeans spatial') + theme(legend.position = "none")
+p2 = ggplot(data.3) + geom_point(aes(x = x, y = y, colour = factor(kmeans)))+ggtitle('Kmeans') + theme(legend.position = "none")
+p3 = ggplot(data.3) + geom_point(aes(x = x, y = y, colour = factor(hier)))+ggtitle('Hierarchical') + theme(legend.position = "none")
+p4 = ggplot(data.3) + geom_point(aes(x = x, y = y, colour = factor(gmm)))+ggtitle('GMM') + theme(legend.position = "none")
+
+# p1;p2;p3;p4
+
+p = plot_grid(p1,p2,p3,p4)
+save_plot('methods_spatial_plot.png',p)
+```
+The result of kmeans_spatial, kmeans and gmm are similar, pretty different from result of hierarchical clustering.
+
+Things to note:
+* The result of kmeans_spatial, kmeans and gmm are pretty similar, pretty different from result of hierarchical clustering.
+* Can see that k-means spatial makes groups much more cohesive
+
+Let's also look at k-means spatial for three clusters for other parameterizations:
+
+```{r}
+df %>% 
+  filter(nclust == 3) %>%
+  filter(lambda == 1) %>%
+  mutate(cluster = factor(cluster)) %>%
+  ggplot(aes(x=x,y=y)) + 
+  geom_point(aes(colour = cluster)) +
+  facet_wrap(.~ quantile_fun) +
+  theme(aspect.ratio=1)
+
+ggsave('spatial_by_quantile.pdf')
+
+system2(command = "pdfcrop", 
+        args    = c("spatial_by_quantile.pdf", 
+                    "spatial_by_quantile_crop.pdf") 
+        )
+```
+
+Things to note:
+
+* Between lambda values, colMins: Clusters are more spotted for large lambda (lambda = 10). May be because colMins is too small.
+* colMeds: Again, looks like clusters are more spotted for lambda = 10. Also big section in the middle is split (could be an initialization problem)
+* colMaxs: Most notable is the presence of basically two clusters in lambda = 10. Could again be an initialization problem. That little peach piece at the bottom doesn't seem to show up either in lambda = 1.
+* It seems with lambda = 10 that more spot-formation is happening since the lambda is pushing even spatially close 
+
+colMins seems to be quite close to normal k-means, in terms of spotting. However, can already see some cohesion happening. This cohesion seems to only increase across the other 2 quantile functions. Larger and larger patches of undisturbed clusters.
+
+Things to improve
+* speed
+* initialization (and also consistency of clustering - aka want to preserve self-ARI)
+* Run all of these multiple times each to be able to see consistency of ARI
+
+
+#### Metrics through different methods.
+1. adjusted rand index
+
+3x3 matrix:
+similarity between kmeans_spatial method and other methods
+row: k=3/6/10
+col: kmeans/hier/gmm
+```{r}
+data = list(data.3, data.6, data.10)
+ad_rand_ind = matrix(0, nrow = 3, ncol=3)
+
+for(i in 1:3){
+  for(j in 1:3){
+    ad_rand_ind[i,j] = adjustedRandIndex(data[[i]]$kmeans_spatial, data[[i]][, (3+j)])
+  }
+}
+colnames(ad_rand_ind) = c('kmeans', 'hier', 'gmm')
+rownames(ad_rand_ind) = c('k=3', 'k=6', 'k=10')
+ad_rand_ind
+
+```
+
+```{r}
+ad_rand_ind %>%
+  as_tibble(rownames = "k") %>%
+  pivot_longer(cols = kmeans:gmm,names_to = "method",values_to = "ARI") %>%
+  mutate(k = as.numeric(substring(k,3))) %>%
+  mutate(method = factor(method)) %>%
+  ggplot() +
+    geom_line(aes(k,ARI,colour = method,group = method)) +
+    labs(title = "ARI of spatial k-means (colMeds, lambda = 1) with basic clustering methods")
+  
+```
+
+```{r}
+k.list = c(3, 6, 10)
+qfunc.list = c('colMaxs','colMeds','colMins')
+
+grid = expand.grid(qfunc.list,k.list)
+aris = apply(grid,1,function(g) {
+  sapply(dfs, function(d) {
+  x = d %>%
+    filter(nclust == as.numeric(g[[2]])) %>%
+    filter(quantile_fun == g[[1]])
+    list(ari_kmeans=adjustedRandIndex(x$cluster,x$cluster_kmeans),ari_hier=adjustedRandIndex(x$cluster,x$cluster_hier))
+})
+})
+
+mean_aris = sapply(aris,function(ari) {
+  list(ari_kmeans=mean(unlist(ari[1,])),ari_hier=mean(unlist(ari[2,])))
+})
+
+sd_aris = sapply(aris,function(ari) {
+  list(ari_kmeans=sd(unlist(ari[1,])),ari_hier=sd(unlist(ari[2,])))
+})
+
+ari.df = cbind(grid,unlist(mean_aris[1,]),unlist(mean_aris[2,]),unlist(sd_aris[1,]),unlist(sd_aris[2,]))
+
+colnames(ari.df) = c('quantile_fun','nclust','ARI_kmeans','ARI_hier','sd_kmeans','sd_hier')
+
+ari.df %>%
+  as_tibble() %>%
+  pivot_longer(cols = -c("quantile_fun","nclust"), names_to = c(".value","method"),names_sep = "_") %>%
+  mutate(method = factor(method)) %>%
+  ggplot(aes(x = nclust,colour = quantile_fun)) +
+    geom_line(aes(y = ARI)) + 
+    geom_errorbar(aes(ymin=ARI-sd,ymax=ARI+sd,color=quantile_fun,width=0.2)) +
+    facet_grid(.~method)
+
+ggsave('sim_ARI.png')
+```
+
+2. silhouette
+
+3x4 matrix:
+For each model, compute the total mean of individual silhouette widths
+row: k=3/6/10
+col: kmeans_spatial/kmeans/hier/gmm
+```{r}
+dis = dist(X)^2
+si = matrix(0, nrow = 3, ncol=4)
+for(i in 1:3){
+  for(j in 1:4){
+    si_res = silhouette(data[[i]][,(2+j)], dis)
+    si[i, j] = summary(si_res)$avg.width # use the total mean of individual silhouette widths to compare models
+  }
+}
+colnames(si) = c('kmeans_spatial','kmeans', 'hier', 'gmm')
+rownames(si) = c('k=3', 'k=6', 'k=10')
+si
+```
+
+```{r}
+si %>%
+  as_tibble(rownames = "k") %>%
+  pivot_longer(cols = kmeans_spatial:gmm,names_to = "method",values_to = "Silhouette") %>%
+  mutate(k = as.numeric(substring(k,3))) %>%
+  mutate(method = factor(method)) %>%
+  ggplot() +
+    geom_line(aes(k,Silhouette,colour = method,group = method)) +
+    labs(title = "Average silhouette width of various methods")
+
+ggsave('avg_sil.png')
+```
+
+
+
+
+
+The performance of kmeans_spatial is not as good as basic kmeans, while it is better than hierarchical and gmm.
+
+3. Within cluster sum of squares
+```{r}
+# function of computing sum of squares in clusters
+# input: k, result - clustering result
+css = function(k, result){
+  total = 0
+  for(i in 1:k){
+    x = X[result==i, ]
+    n = nrow(x)
+    x.mean = colMeans(x)
+    x = x-matrix(rep(x.mean, n), byrow = T, nrow=n)
+    total = total + sum(x^2)
+  }
+  return(total)
+}
+
+k.list = c(3, 6, 10)
+sum.sq = matrix(0, nrow = 3, ncol=4)
+for(i in 1:3){
+  for(j in 1:4){
+    sum.sq[i, j] = css(k.list[i], data[[i]][, 2+j]) 
+  }
+}
+colnames(sum.sq) = c('kmeans_spatial','kmeans', 'hier', 'gmm')
+rownames(sum.sq) = c('k=3', 'k=6', 'k=10')
+sum.sq
+```
+
+
+```{r}
+sum.sq %>%
+  as_tibble(rownames = "k") %>%
+  pivot_longer(cols = kmeans_spatial:gmm,names_to = "method",values_to = "WCSS") %>%
+  mutate(k = as.numeric(substring(k,3))) %>%
+  mutate(method = factor(method)) %>%
+  ggplot() +
+    geom_line(aes(k,WCSS,colour = method,group = method)) +
+    labs(title = "WCSS of various clustering methods")
+```
+
+4. Avg distance from centroid
+
+```{r}
+# function of computing sum of squares in clusters
+# input: k, result - clustering result
+avg_css = function(k, result){
+  total = 0
+  for(i in 1:k){
+    x = X[result==i, ]
+    n = nrow(x)
+    x.mean = colMeans(x)
+    x = x-matrix(rep(x.mean, n), byrow = T, nrow=n)
+    total = total + mean(sqrt(rowSums(x^2)))
+  }
+  return(total/k)
+}
+
+k.list = c(3, 6, 10)
+avg.sq = matrix(0, nrow = 3, ncol=4)
+for(i in 1:3){
+  for(j in 1:4){
+    avg.sq[i, j] = avg_css(k.list[i], data[[i]][, 2+j]) 
+  }
+}
+
+colnames(avg.sq) = c('kmeans_spatial','kmeans', 'hier', 'gmm')
+rownames(avg.sq) = c('k=3', 'k=6', 'k=10')
+avg.sq
+```
+
+```{r}
+avg.sq %>%
+  as_tibble(rownames = "k") %>%
+  pivot_longer(cols = kmeans_spatial:gmm,names_to = "method",values_to = "Avg_SS") %>%
+  mutate(k = as.numeric(substring(k,3))) %>%
+  mutate(method = factor(method)) %>%
+  ggplot() +
+    geom_line(aes(k,Avg_SS,colour = method,group = method)) +
+    labs(title = "Average SS of various clustering methods")
+
+ggsave('avg_ss.png')
+```
+
+
+## Comparision between different nclust/lambda/quantile_func of kmeans_spatial methods
+1. silhouette
+```{r}
+si.list  = list()
+
+k.list = c(3, 6, 10)
+lambda.list = c(1, 10)
+qfunc.list = c('colMaxs','colMeds','colMins')
+
+for(k in 1:3){
+  si_k = matrix(0, nrow= 2, ncol=3)
+  colnames(si_k) = qfunc.list
+  rownames(si_k) = c("lambda=1", "lambda=10")
+  
+for(i in 1:2){
+  for(j in 1:3){
+    temp =  df %>% filter(lambda == lambda.list[i]) %>%
+         filter(nclust == k.list[k]) %>%
+         filter(quantile_fun == qfunc.list[j])
+    s = silhouette(temp$cluster, dis)
+    si_k[i,j] = summary(s)$avg.width
+  }
+  si.list[[k]] = data.frame(si_k)
+}
+}
+names(si.list) = c("k=3", "k=6", "k=10")
+si.list
+```
+
+```{r}
+si.df = do.call(rbind,si.list) %>%
+  as_tibble(rownames = "paras") %>%
+  separate(paras,into = c("k","lambda"),sep = "\\.") %>%
+  mutate(k = as.numeric(substring(k,3))) %>%
+  mutate(lambda = as.numeric(substring(lambda,8))) %>%
+  pivot_longer(cols = colMaxs:colMins,names_to = "quant_fun",values_to = "Silhouette") %>%
+  mutate(quant_fun = factor(quant_fun)) %>%
+  mutate(lambda = factor(lambda))
+
+si.df %>%
+  ggplot() +
+    geom_line(aes(k,Silhouette, colour = quant_fun,linetype = lambda)) +
+    labs(title = "Avg silhouette width for various parameterizations")
+
+ggsave('sil_width_params.png')
+```
+
+2.Within cluster sum of squares
+```{r}
+sum.sq.list  = list()
+
+k.list = c(3, 6, 10)
+lambda.list = c(1, 10)
+qfunc.list = c('colMaxs','colMeds','colMins')
+for(k in 1:3){
+  sum.sq_k = matrix(0, nrow= 2, ncol=3)
+  colnames(sum.sq_k) = qfunc.list
+  rownames(sum.sq_k) = c("lambda=1", "lambda=10")
+  
+for(i in 1:2){
+  for(j in 1:3){
+    temp =  df %>% filter(lambda == lambda.list[i]) %>%
+         filter(nclust == k.list[k]) %>%
+         filter(quantile_fun == qfunc.list[j])
+    sum.sq_k[i,j] = css(k.list[k], temp$cluster)
+  }
+  sum.sq.list[[k]] = data.frame(sum.sq_k)
+}
+}
+names(sum.sq.list) = c("k=3", "k=6", "k=10")
+sum.sq.list
+```
+
+
+```{r}
+sum.sq.df = do.call(rbind,sum.sq.list) %>%
+  as_tibble(rownames = "paras") %>%
+  separate(paras,into = c("k","lambda"),sep = "\\.") %>%
+  mutate(k = as.numeric(substring(k,3))) %>%
+  mutate(lambda = as.numeric(substring(lambda,8))) %>%
+  pivot_longer(cols = colMaxs:colMins,names_to = "quant_fun",values_to = "WCSS") %>%
+  mutate(quant_fun = factor(quant_fun)) %>%
+  mutate(lambda = factor(lambda))
+
+sum.sq.df %>%
+  ggplot() +
+    geom_line(aes(k,WCSS, colour = quant_fun,linetype = lambda)) +
+    labs(title = "Avg WCSS for various parameterizations")
+```
+
+3. Average sum of squares
+```{r}
+avg.sq.list  = list()
+
+k.list = c(3, 6, 10)
+lambda.list = c(1, 10)
+qfunc.list = c('colMaxs','colMeds','colMins')
+for(k in 1:3){
+  sum.sq_k = matrix(0, nrow= 2, ncol=3)
+  colnames(sum.sq_k) = qfunc.list
+  rownames(sum.sq_k) = c("lambda=1", "lambda=10")
+  
+for(i in 1:2){
+  for(j in 1:3){
+    temp =  df %>% filter(lambda == lambda.list[i]) %>%
+         filter(nclust == k.list[k]) %>%
+         filter(quantile_fun == qfunc.list[j])
+    sum.sq_k[i,j] = avg_css(k.list[k], temp$cluster)
+  }
+  avg.sq.list[[k]] = data.frame(sum.sq_k)
+}
+}
+names(avg.sq.list) = c("k=3", "k=6", "k=10")
+avg.sq.list
+```
+
+```{r}
+avg.sq.df = do.call(rbind,avg.sq.list) %>%
+  as_tibble(rownames = "paras") %>%
+  separate(paras,into = c("k","lambda"),sep = "\\.") %>%
+  mutate(k = as.numeric(substring(k,3))) %>%
+  mutate(lambda = as.numeric(substring(lambda,8))) %>%
+  pivot_longer(cols = colMaxs:colMins,names_to = "quant_fun",values_to = "Avg_SS") %>%
+  mutate(quant_fun = factor(quant_fun)) %>%
+  mutate(lambda = factor(lambda))
+
+avg.sq.df %>%
+  ggplot() +
+    geom_line(aes(k,Avg_SS, colour = quant_fun,linetype = lambda)) +
+    labs(title = "Avg SS for various parameterizations")
+ggsave('avg_ss_params.png')
+```
+
+```{r}
+saveRDS(data,"comparisons.rds")
+```
+
